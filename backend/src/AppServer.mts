@@ -188,8 +188,33 @@ app.put("/pecaEdit", async (req, res) => {
 });
 
 app.get("/pecasList", async (req, res) => {
-  const peças = await prisma.peca.findMany();
-  return res.json(peças);
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.pageSize as string) || 20; 
+    const skip = (page - 1) * pageSize;
+
+    try {
+        const [peças, totalPeças] = await prisma.$transaction([
+            prisma.peca.findMany({
+                skip: skip,
+                take: pageSize,
+                orderBy: { id: 'asc' }, 
+            }),
+            prisma.peca.count(),
+        ]);
+
+        return res.json({
+            data: peças,
+            pagination: {
+                total: totalPeças,
+                page: page,
+                pageSize: pageSize,
+                totalPages: Math.ceil(totalPeças / pageSize)
+            }
+        });
+    } catch (error) {
+        console.error("Erro ao listar peças com paginação:", error);
+        return res.status(500).json({ error: "Erro interno do servidor." });
+    }
 });
 
 app.post("/funcionario", async (req, res) => {
@@ -633,97 +658,108 @@ app.get("/funcionariosListAll", async (req, res) => {
 
 
 app.post("/gerarRelatorio", async (req, res) => {
-    const startTime = performance.now();
+    const startTime = performance.now();
 
-    try {
-        const { aeronaveId, autor } = req.body;
-        const aeronaveIdNum = Number(aeronaveId);
+    try {
+        const { aeronaveId, autor } = req.body;
+        const aeronaveIdNum = Number(aeronaveId);
 
-        if (!aeronaveIdNum || !autor) {
-            return res.status(400).json({ error: "Aeronave e Autor do relatório são obrigatórios." });
-        }
-        
-        
-        const etapas = await prisma.etapa.findMany({
-            where: { aeronaveId: aeronaveIdNum },
-            select: { status: true, nome: true }, 
-        });
-        
-        
-        if (etapas.length === 0) {
-            return res.status(403).json({ error: `Relatório negado: Nenhuma etapa de produção encontrada para a aeronave ${aeronaveId}.` });
-        }
+        if (!aeronaveIdNum || !autor) {
+            return res.status(400).json({ error: "Aeronave e Autor do relatório são obrigatórios." });
+        }
 
-        const etapasNaoConcluidas = etapas.filter(e => e.status !== 'Concluido');
-        if (etapasNaoConcluidas.length > 0) {
-            const nomesEtapasPendentes = etapasNaoConcluidas.map(e => e.nome).join(', ');
-            return res.status(403).json({ error: `Relatório negado: As seguintes etapas ainda não estão concluídas: ${nomesEtapasPendentes}` });
-        }
-        
-        
-        const todosTestes = await prisma.teste.findMany({
-            where: { aeronaveId: aeronaveIdNum },
-            select: { tipo: true, resultado: true, data: true }, 
-            orderBy: { data: 'desc' },
-        });
-        
-        const ultimoResultadoPorTipo = todosTestes.reduce((acc, teste) => {
-            if (!acc.has(teste.tipo)) {
-                acc.set(teste.tipo, teste.resultado);
-            }
-            return acc;
-        }, new Map());
 
-        const testesReprovados = Array.from(ultimoResultadoPorTipo.entries())
-            .filter(([, resultado]) => resultado !== 'Aprovado');
+        const [etapasValidacao, todosTestes] = await prisma.$transaction([
+            prisma.etapa.findMany({
+                where: { aeronaveId: aeronaveIdNum },
+                select: { status: true, nome: true }, 
+            }),
+            prisma.teste.findMany({
+                where: { aeronaveId: aeronaveIdNum },
+                select: { tipo: true, resultado: true, data: true }, 
+                orderBy: { data: 'desc' },
+            })
+        ]);
 
-        if (testesReprovados.length > 0) {
-            const tiposReprovados = testesReprovados.map(([tipo]) => tipo).join(', ');
-            return res.status(403).json({ error: `Relatório negado: Os seguintes testes não foram aprovados (status final): ${tiposReprovados}` });
-        }
+        if (etapasValidacao.length === 0) {
+            return res.status(403).json({ error: `Relatório negado: Nenhuma etapa de produção encontrada para a aeronave ${aeronaveId}.` });
+        }
+        const etapasNaoConcluidas = etapasValidacao.filter(e => e.status !== 'Concluido');
+        if (etapasNaoConcluidas.length > 0) {
+            const nomesEtapasPendentes = etapasNaoConcluidas.map(e => e.nome).join(', ');
+            return res.status(403).json({ error: `Relatório negado: As seguintes etapas ainda não estão concluídas: ${nomesEtapasPendentes}` });
+        }
 
-        const aeronave = await prisma.aeronave.findUnique({
-            where: { codigo: aeronaveIdNum },
-            include: {
-                pecas: {
-                    select: { id: true, nome: true, fornecedor: true, status: true, tipo: true }
-                },
-                etapas: {
-                    include: {
-                        funcionarios: {
-                            include: {
-                                funcionario: { select: { nome: true, cargo: true } }
-                            }
-                        }
-                    }
-                },
-                testes: {
-                    select: { tipo: true, resultado: true, data: true },
-                    orderBy: { data: 'desc' }
-                }
-            }
-        });
+        const ultimoResultadoPorTipo = todosTestes.reduce((acc, teste) => {
+            if (!acc.has(teste.tipo)) {
+                acc.set(teste.tipo, teste.resultado);
+            }
+            return acc;
+        }, new Map());
 
-        if (!aeronave) {
-            return res.status(404).json({ error: "Aeronave não encontrada." });
-        }
+        const testesReprovados = Array.from(ultimoResultadoPorTipo.entries())
+            .filter(([, resultado]) => resultado !== 'Aprovado');
 
-        const endTime = performance.now();
-        const tempoProcessamento = (endTime - startTime).toFixed(3);
+        if (testesReprovados.length > 0) {
+            const tiposReprovados = testesReprovados.map(([tipo]) => tipo).join(', ');
+            return res.status(403).json({ error: `Relatório negado: Os seguintes testes não foram aprovados (status final): ${tiposReprovados}` });
+        }
 
-        return res.status(200).json({
-            aeronave,
-            relatorioInfo: {
-                dataGeracao: new Date().toISOString(),
-                autor: autor,
-                tempoProcessamento: `${tempoProcessamento} ms`
-            }
-        });
+        const [aeronaveBasica, pecasDetalhe, etapasDetalhe, testesDetalhe] = await prisma.$transaction([
+            prisma.aeronave.findUnique({ 
+                where: { codigo: aeronaveIdNum },
+            }),
+            prisma.peca.findMany({
+                where: { aeronaveId: aeronaveIdNum },
+                select: { id: true, nome: true, fornecedor: true, status: true, tipo: true }
+            }),
+            prisma.etapa.findMany({
+                where: { aeronaveId: aeronaveIdNum },
+                include: { 
+                    funcionarios: { 
+                        include: { funcionario: { select: { nome: true, cargo: true } } }
+                    }
+                }
+            }),
+            prisma.teste.findMany({
+                where: { aeronaveId: aeronaveIdNum },
+                select: { tipo: true, resultado: true, data: true },
+                orderBy: { data: 'desc' }
+            })
+        ]);
 
-    } catch (error) {
-        console.error("Erro ao gerar relatório:", error);
-        return res.status(500).json({ error: "Erro interno do servidor ao gerar relatório." });
-    }
+        if (!aeronaveBasica) {
+            return res.status(404).json({ error: "Aeronave não encontrada." });
+        }
+
+        const aeronaveCompleta = {
+            ...aeronaveBasica,
+            pecas: pecasDetalhe,
+            etapas: etapasDetalhe,
+            testes: testesDetalhe
+        };
+
+        const endTime = performance.now();
+        const tpDuration = endTime - startTime;
+
+        console.log(`[REAL TP] TP: ${tpDuration.toFixed(3)} ms`);
+
+        return res.status(200).json({
+            aeronave: aeronaveCompleta,
+            relatorioInfo: {
+                dataGeracao: new Date().toISOString(),
+                autor: autor,
+                tempoProcessamento: `${tpDuration} ms`
+            }
+        });
+
+    } catch (error) {
+        console.error("Erro ao gerar relatório:", error);
+        if ((error as any).code === 'P2003') {
+            return res.status(404).json({ error: "Aeronave não encontrada. Verifique o código." });
+        }
+        return res.status(500).json({ error: "Erro interno do servidor ao gerar relatório.", detalhe: error });
+    }
 });
 
 app.listen(PORT, () => {
