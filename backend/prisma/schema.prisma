@@ -1,0 +1,155 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "mysql"
+  url = env("DATABASE_URL")
+}
+
+enum Hierarquia {
+  Administrador
+  Engenheiro
+  Operador
+}
+
+enum TipoAeronave {
+  Comercial
+  Militar
+}
+
+enum StatusPeca {
+  Em_producao
+  Em_transporte
+  Pronta_para_uso
+}
+
+enum TipoPeca {
+  Nacional
+  Importada
+}
+
+enum StatusProducao {
+  Pendente
+  Em_andamento
+  Concluido
+}
+
+enum TipoTeste {
+  Eletrico
+  Hidraulico
+  Aerodinamico
+}
+
+enum ResultadoTeste {
+  Aprovado
+  Reprovado
+}
+
+model Endereco {
+  id            Int        @id @default(autoincrement())
+  rua           String     @db.VarChar(100)
+  numero        Int
+  bairro        String     @db.VarChar(50)
+  cidade        String     @db.VarChar(50)
+
+  funcionarioId Int?       @unique
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id])
+}
+
+model Telefone {
+  id            Int        @id @default(autoincrement())
+  ddd           String     @db.VarChar(3)
+  numero        String     @db.VarChar(10)
+
+  funcionarioId Int?       @unique
+  funcionario   Funcionario? @relation(fields: [funcionarioId], references: [id])
+}
+
+model Funcionario {
+  id                 Int        @id @default(autoincrement())
+  nome               String     @db.VarChar(100)
+  cpf                String     @unique @db.VarChar(14)
+  cargo              Hierarquia
+  login              String     @unique @db.VarChar(100)
+  senha              String
+
+  endereco           Endereco?  
+  telefone           Telefone?  
+
+  etapas_trabalhadas EtapaFuncionario[]
+  user               User?
+}
+
+model Aeronave {
+  codigo     Int           @id @unique @default(autoincrement()) 
+  modelo     String        @db.VarChar(100)
+  tipo       TipoAeronave
+  capacidade Int
+  autonomia  Int
+  
+  pecas      Peca[]
+  etapas     Etapa[]
+  testes     Teste[] 
+}
+
+model Peca {
+  id         Int        @id @default(autoincrement())
+  nome       String     @db.VarChar(100)
+  tipo       TipoPeca
+  fornecedor String     @db.VarChar(100)
+  status     StatusPeca
+  
+  aeronaveId Int
+  aeronave   Aeronave   @relation(fields: [aeronaveId], references: [codigo])
+}
+
+model Etapa {
+  id           Int              @id @default(autoincrement())
+  nome         String           @db.VarChar(100)
+  dataPrevista DateTime         @db.Date
+  status       StatusProducao
+  
+  aeronaveId   Int
+  aeronave     Aeronave         @relation(fields: [aeronaveId], references: [codigo])
+  
+  funcionarios EtapaFuncionario[]
+}
+
+model Teste {
+    id          Int           @id @default(autoincrement())
+    tipo        TipoTeste     
+    data        DateTime      @default(now()) 
+    resultado   ResultadoTeste
+    
+    // Relação com a Aeronave
+    aeronaveId  Int
+    aeronave    Aeronave      @relation(fields: [aeronaveId], references: [codigo])
+}
+
+model EtapaFuncionario {
+  etapaId       Int
+  funcionarioId Int
+  
+  etapa         Etapa      @relation(fields: [etapaId], references: [id])
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id])
+  
+  @@id([etapaId, funcionarioId])
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  password     String
+  funcionario  Funcionario? @relation(fields: [funcionarioId], references: [id])
+  funcionarioId Int?    @unique 
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

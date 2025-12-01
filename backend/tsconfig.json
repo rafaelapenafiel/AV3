@@ -1,0 +1,33 @@
+  {
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+
+    "allowImportingTsExtensions": true,
+    
+    "noEmit": true, 
+    
+    "lib": ["esnext"],
+    "types": ["node"],
+    
+    "rootDir": "./", 
+
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+
+    "strict": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    
+    "verbatimModuleSyntax": false,
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.mts", "src/scripts/generateCharts.cjs"],
+}
